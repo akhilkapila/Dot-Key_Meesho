@@ -1,0 +1,21 @@
+transaction_id,order_id,product_name,quantity,amount,date,customer_name
+TXN001,ORD-2024-001,Vitamin C Serum,2,1599.00,2024-01-15,Priya Sharma
+TXN002,ORD-2024-002,Retinol Night Cream,1,1299.00,2024-01-15,Rahul Verma
+TXN003,ORD-2024-003,Hyaluronic Acid Moisturizer,3,2397.00,2024-01-16,Anita Patel
+TXN004,ORD-2024-004,Sunscreen SPF 50,1,699.00,2024-01-16,Vikram Singh
+TXN005,ORD-2024-005,Niacinamide Toner,2,998.00,2024-01-17,Sneha Kapoor
+TXN006,ORD-2024-006,Lip Balm Set,4,796.00,2024-01-17,Amit Kumar
+TXN007,ORD-2024-007,Hair Serum,1,899.00,2024-01-18,Divya Menon
+TXN008,ORD-2024-008,Body Lotion,2,798.00,2024-01-18,Karthik Iyer
+TXN009,ORD-2024-009,Face Wash,1,449.00,2024-01-19,Pooja Reddy
+TXN010,ORD-2024-010,Eye Cream,1,1199.00,2024-01-19,Sanjay Gupta
+TXN011,ORD-2024-011,Cleansing Oil,1,799.00,2024-01-20,Meera Nair
+TXN012,ORD-2024-012,Sheet Mask Pack,5,999.00,2024-01-20,Arjun Das
+TXN013,ORD-2024-013,Vitamin E Capsules,2,598.00,2024-01-21,Ritu Agarwal
+TXN014,ORD-2024-014,Aloe Vera Gel,3,447.00,2024-01-21,Nikhil Joshi
+TXN015,ORD-2024-015,Anti-Acne Serum,1,1099.00,2024-01-22,Swati Mishra
+TXN016,ORD-2024-016,Beard Oil,1,599.00,2024-01-22,Rohan Malhotra
+TXN017,ORD-2024-017,Hand Cream,2,398.00,2024-01-23,Kavitha Rao
+TXN018,ORD-2024-018,Foot Cream,1,349.00,2024-01-23,Siddharth Pillai
+TXN019,ORD-2024-019,Tanning Lotion,1,899.00,2024-01-24,Anjali Choudhury
+TXN020,ORD-2024-020,Brightening Serum,2,2198.00,2024-01-24,Prakash Hegde
