@@ -102,9 +102,9 @@ class MatchingEngine:
         match_type: str = 'exact',
         fuzzy_threshold: int = 80,
         tolerance: float = 0.01
-    ) -> Dict[int, List[int]]:
+    ) -> Tuple[Dict[int, List[int]], int]:
         """
-        Find matching rows between two DataFrames.
+        Find matching rows between two DataFrames using optimized algorithms.
         
         Args:
             target_df: Target DataFrame (where we want to populate)
@@ -116,60 +116,103 @@ class MatchingEngine:
             tolerance: Tolerance for numeric range matching
             
         Returns:
-            Dict mapping target row index to list of matching source row indices
+            Tuple of (Dict mapping target row index to list of matching source row indices, total_rows)
         """
         matches = {}
+        total_rows = len(target_df)
         
-        target_values = target_df[target_col].astype(str).str.strip().str.lower()
-        source_values = source_df[source_col].astype(str).str.strip().str.lower()
-        
-        total_rows = len(target_values)
-        
-        for target_idx, target_val in enumerate(target_values):
-            if pd.isna(target_val) or target_val == 'nan' or target_val == '':
-                continue
-                
-            matching_source_indices = []
+        if match_type == 'exact':
+            # OPTIMIZED: Hash-based exact matching - O(n+m) instead of O(n*m)
+            # Build a lookup dictionary from source values
+            source_lookup = {}
+            source_values = source_df[source_col].astype(str).str.strip().str.lower()
             
             for source_idx, source_val in enumerate(source_values):
                 if pd.isna(source_val) or source_val == 'nan' or source_val == '':
                     continue
+                if source_val not in source_lookup:
+                    source_lookup[source_val] = []
+                source_lookup[source_val].append(source_idx)
+            
+            # Now lookup each target value in the hash map
+            target_values = target_df[target_col].astype(str).str.strip().str.lower()
+            
+            for target_idx, target_val in enumerate(target_values):
+                if pd.isna(target_val) or target_val == 'nan' or target_val == '':
+                    continue
+                if target_val in source_lookup:
+                    matches[target_idx] = source_lookup[target_val].copy()
+        
+        elif match_type == 'numeric_range':
+            # For numeric range, we still need comparisons but can optimize
+            try:
+                target_nums = pd.to_numeric(target_df[target_col], errors='coerce')
+                source_nums = pd.to_numeric(source_df[source_col], errors='coerce')
                 
-                is_match = False
+                # Build source index for non-null values
+                valid_source = [(idx, val) for idx, val in enumerate(source_nums) if pd.notna(val)]
                 
-                if match_type == 'exact':
-                    is_match = (target_val == source_val)
+                for target_idx, t_num in enumerate(target_nums):
+                    if pd.isna(t_num):
+                        continue
                     
-                elif match_type == 'fuzzy':
-                    score = fuzz.ratio(target_val, source_val)
-                    is_match = (score >= fuzzy_threshold)
-                    
-                elif match_type == 'numeric_range':
-                    try:
-                        t_num = float(target_df[target_col].iloc[target_idx])
-                        s_num = float(source_df[source_col].iloc[source_idx])
+                    matching_indices = []
+                    for source_idx, s_num in valid_source:
                         if t_num != 0:
                             diff_ratio = abs(t_num - s_num) / abs(t_num)
-                            is_match = (diff_ratio <= tolerance)
-                        else:
-                            is_match = (s_num == 0)
-                    except (ValueError, TypeError):
-                        is_match = False
-                        
-                elif match_type == 'date_range':
-                    try:
-                        t_date = pd.to_datetime(target_df[target_col].iloc[target_idx])
-                        s_date = pd.to_datetime(source_df[source_col].iloc[source_idx])
-                        diff_days = abs((t_date - s_date).days)
-                        is_match = (diff_days <= int(tolerance))
-                    except (ValueError, TypeError):
-                        is_match = False
-                
-                if is_match:
-                    matching_source_indices.append(source_idx)
+                            if diff_ratio <= tolerance:
+                                matching_indices.append(source_idx)
+                        elif s_num == 0:
+                            matching_indices.append(source_idx)
+                    
+                    if matching_indices:
+                        matches[target_idx] = matching_indices
+            except Exception:
+                pass
+        
+        elif match_type == 'fuzzy':
+            # Fuzzy matching requires pairwise comparison, but we can batch
+            target_values = target_df[target_col].astype(str).str.strip().str.lower()
+            source_values = source_df[source_col].astype(str).str.strip().str.lower()
             
-            if matching_source_indices:
-                matches[target_idx] = matching_source_indices
+            # Pre-filter valid values
+            valid_source = [(idx, val) for idx, val in enumerate(source_values) 
+                           if pd.notna(val) and val != 'nan' and val != '']
+            
+            for target_idx, target_val in enumerate(target_values):
+                if pd.isna(target_val) or target_val == 'nan' or target_val == '':
+                    continue
+                
+                matching_indices = []
+                for source_idx, source_val in valid_source:
+                    score = fuzz.ratio(target_val, source_val)
+                    if score >= fuzzy_threshold:
+                        matching_indices.append(source_idx)
+                
+                if matching_indices:
+                    matches[target_idx] = matching_indices
+        
+        elif match_type == 'date_range':
+            try:
+                target_dates = pd.to_datetime(target_df[target_col], errors='coerce')
+                source_dates = pd.to_datetime(source_df[source_col], errors='coerce')
+                
+                valid_source = [(idx, val) for idx, val in enumerate(source_dates) if pd.notna(val)]
+                
+                for target_idx, t_date in enumerate(target_dates):
+                    if pd.isna(t_date):
+                        continue
+                    
+                    matching_indices = []
+                    for source_idx, s_date in valid_source:
+                        diff_days = abs((t_date - s_date).days)
+                        if diff_days <= int(tolerance):
+                            matching_indices.append(source_idx)
+                    
+                    if matching_indices:
+                        matches[target_idx] = matching_indices
+            except Exception:
+                pass
         
         return matches, total_rows
     

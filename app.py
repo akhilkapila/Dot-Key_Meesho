@@ -964,18 +964,25 @@ def render_export_tab():
     st.markdown("### 📥 Download Results")
     
     if st.session_state.reconciled_sales_df is not None:
+        # Show success message
+        st.success(f"✅ **Reconciliation Complete!** Ready to download.")
+        
         matching_engine = get_matching_engine()
         
         # Show stats
         if st.session_state.match_stats:
             stats = st.session_state.match_stats
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Match Rate", f"{stats.match_percentage:.1f}%")
             with col2:
-                st.metric("Matched Rows", stats.matched_rows)
+                st.metric("Matched Rows", f"{stats.matched_rows:,}")
             with col3:
-                st.metric("Multiple Matches", stats.multiple_match_rows)
+                st.metric("Unmatched", f"{stats.unmatched_rows:,}")
+            with col4:
+                st.metric("Multiple Matches", f"{stats.multiple_match_rows:,}")
+        
+        st.markdown("---")
         
         # Filename options
         timestamp_filename = st.checkbox("Add Timestamp to Filename", value=True, key="timestamp_filename")
@@ -985,20 +992,24 @@ def render_export_tab():
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base_name = f"reconciled_workbook_{timestamp}"
         
-        # Download button
-        workbook_data = matching_engine.export_reconciled_workbook(
-            st.session_state.reconciled_sales_df,
-            st.session_state.reconciled_settlement_df
-        )
-        
-        st.download_button(
-            "📥 Download Reconciled Workbook (Excel)",
-            data=workbook_data,
-            file_name=f"{base_name}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="primary"
-        )
+        # Download button with error handling
+        try:
+            with st.spinner("Preparing download file..."):
+                workbook_data = matching_engine.export_reconciled_workbook(
+                    st.session_state.reconciled_sales_df,
+                    st.session_state.reconciled_settlement_df
+                )
+            
+            st.download_button(
+                "📥 Download Reconciled Workbook (Excel)",
+                data=workbook_data,
+                file_name=f"{base_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary"
+            )
+        except Exception as e:
+            st.error(f"❌ Error generating download: {str(e)}")
     else:
         st.info("💡 Click 'Run Reconciliation' above to process the data and enable download.")
 
