@@ -168,18 +168,22 @@ def init_session_state():
         'sales_df': None,
         'settlement_df': None,
         'credit_note_df': None,
+        'comparison_df': None,
         'reconciled_sales_df': None,
         'reconciled_settlement_df': None,
         'reconciled_credit_note_df': None,
+        'reconciled_comparison_df': None,
         'workbook_created': False,
         
         # File info
         'sales_file_name': None,
         'settlement_file_name': None,
         'credit_note_file_name': None,
+        'comparison_file_name': None,
         'sales_stats': None,
         'settlement_stats': None,
         'credit_note_stats': None,
+        'comparison_stats': None,
         
         # Matching configuration
         'match_rules': [],
@@ -406,10 +410,11 @@ def render_upload_tab():
     
     file_handler = get_file_handler()
     
-    col1, col2, col3 = st.columns(3)
+    # Row 1: Sales and Settlement
+    row1_col1, row1_col2 = st.columns(2)
     
-    # Sales File Upload
-    with col1:
+    # Sales File Upload (Row 1, Col 1)
+    with row1_col1:
         st.markdown("### 📊 Sales File")
         render_file_uploader(
             "sales",
@@ -420,8 +425,8 @@ def render_upload_tab():
             "sales_key"
         )
     
-    # Settlement File Upload
-    with col2:
+    # Settlement File Upload (Row 1, Col 2)
+    with row1_col2:
         st.markdown("### 💰 Settlement File")
         render_file_uploader(
             "settlement",
@@ -432,8 +437,11 @@ def render_upload_tab():
             "settlement_key"
         )
     
-    # Credit Note File Upload (Optional)
-    with col3:
+    # Row 2: Credit Note and Comparison Data
+    row2_col1, row2_col2 = st.columns(2)
+    
+    # Credit Note File Upload (Row 2, Col 1)
+    with row2_col1:
         st.markdown("### 📝 Credit Note File")
         render_file_uploader(
             "credit_note",
@@ -444,10 +452,30 @@ def render_upload_tab():
             "credit_note_key"
         )
     
+    # Comparison Data File Upload (Row 2, Col 2)
+    with row2_col2:
+        st.markdown("### 📋 Comparison Data")
+        render_file_uploader(
+            "comparison",
+            file_handler,
+            "comparison_df",
+            "comparison_file_name",
+            "comparison_stats",
+            "comparison_key"
+        )
+    
     st.markdown("---")
     
-    # Merge Section
-    if st.session_state.sales_df is not None and st.session_state.settlement_df is not None:
+    # Count loaded files for merge section
+    loaded_count = sum([
+        st.session_state.sales_df is not None,
+        st.session_state.settlement_df is not None,
+        st.session_state.credit_note_df is not None,
+        st.session_state.comparison_df is not None
+    ])
+    
+    # Merge Section - show when at least 2 files are loaded
+    if loaded_count >= 2:
         render_merge_section()
 
 
@@ -606,6 +634,8 @@ def render_logic_builder_tab():
         loaded_files.append('Settlement')
     if st.session_state.credit_note_df is not None:
         loaded_files.append('Credit Note')
+    if st.session_state.comparison_df is not None:
+        loaded_files.append('Comparison Data')
     
     if len(loaded_files) < 2:
         st.warning(f"⚠️ Please upload at least 2 files in the **Upload** tab. Currently loaded: {len(loaded_files)}")
@@ -615,6 +645,7 @@ def render_logic_builder_tab():
     sales_columns = list(st.session_state.sales_df.columns) if st.session_state.sales_df is not None else []
     settlement_columns = list(st.session_state.settlement_df.columns) if st.session_state.settlement_df is not None else []
     credit_note_columns = list(st.session_state.credit_note_df.columns) if st.session_state.credit_note_df is not None else []
+    comparison_columns = list(st.session_state.comparison_df.columns) if st.session_state.comparison_df is not None else []
     
     # Show loaded files info
     st.info(f"📁 Loaded files: **{', '.join(loaded_files)}**")
@@ -642,13 +673,20 @@ def render_logic_builder_tab():
 def render_match_rules(sales_columns: List[str], settlement_columns: List[str]):
     """Render match rules builder with sheet selection."""
     
-    # Get Credit Note columns if available
+    # Get Credit Note and Comparison columns if available
     credit_note_columns = list(st.session_state.credit_note_df.columns) if st.session_state.credit_note_df is not None else []
+    comparison_columns = list(st.session_state.comparison_df.columns) if st.session_state.comparison_df is not None else []
     
-    # Build available sheets list
-    available_sheets = ['Sales', 'Settlement']
+    # Build available sheets list based on loaded files
+    available_sheets = []
+    if st.session_state.sales_df is not None:
+        available_sheets.append('Sales')
+    if st.session_state.settlement_df is not None:
+        available_sheets.append('Settlement')
     if st.session_state.credit_note_df is not None:
         available_sheets.append('Credit Note')
+    if st.session_state.comparison_df is not None:
+        available_sheets.append('Comparison Data')
     
     # Helper to get columns for a sheet
     def get_columns_for_sheet(sheet_name):
@@ -658,6 +696,8 @@ def render_match_rules(sales_columns: List[str], settlement_columns: List[str]):
             return settlement_columns
         elif sheet_name == 'Credit Note':
             return credit_note_columns
+        elif sheet_name == 'Comparison Data':
+            return comparison_columns
         return []
     
     # Add new rule button
@@ -788,13 +828,20 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
     """Render population rules builder with sheet and column letter selection."""
     from utils.matching_engine import get_column_letters_with_names, index_to_col_letter
     
-    # Get Credit Note columns if available
+    # Get Credit Note and Comparison columns if available
     credit_note_columns = list(st.session_state.credit_note_df.columns) if st.session_state.credit_note_df is not None else []
+    comparison_columns = list(st.session_state.comparison_df.columns) if st.session_state.comparison_df is not None else []
     
-    # Build available sheets list
-    available_sheets = ['Sales', 'Settlement']
+    # Build available sheets list based on loaded files
+    available_sheets = []
+    if st.session_state.sales_df is not None:
+        available_sheets.append('Sales')
+    if st.session_state.settlement_df is not None:
+        available_sheets.append('Settlement')
     if st.session_state.credit_note_df is not None:
         available_sheets.append('Credit Note')
+    if st.session_state.comparison_df is not None:
+        available_sheets.append('Comparison Data')
     
     # Helper to get columns for a sheet
     def get_columns_for_sheet(sheet_name):
@@ -804,6 +851,8 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
             return settlement_columns
         elif sheet_name == 'Credit Note':
             return credit_note_columns
+        elif sheet_name == 'Comparison Data':
+            return comparison_columns
         return []
     
     # Generate column letter options for each sheet (only if loaded)
@@ -1048,7 +1097,8 @@ def render_export_tab():
     loaded_count = sum([
         st.session_state.sales_df is not None,
         st.session_state.settlement_df is not None,
-        st.session_state.credit_note_df is not None
+        st.session_state.credit_note_df is not None,
+        st.session_state.comparison_df is not None
     ])
     
     if loaded_count < 2:
@@ -1127,7 +1177,8 @@ def render_export_tab():
                 workbook_data = matching_engine.export_reconciled_workbook(
                     st.session_state.reconciled_sales_df,
                     st.session_state.reconciled_settlement_df,
-                    st.session_state.reconciled_credit_note_df
+                    st.session_state.reconciled_credit_note_df,
+                    st.session_state.reconciled_comparison_df
                 )
             
             st.download_button(
@@ -1164,6 +1215,9 @@ def run_reconciliation():
     if st.session_state.credit_note_df is not None:
         loaded_files.append(f"Credit Note ({len(st.session_state.credit_note_df):,})")
         total_rows += len(st.session_state.credit_note_df)
+    if st.session_state.comparison_df is not None:
+        loaded_files.append(f"Comparison ({len(st.session_state.comparison_df):,})")
+        total_rows += len(st.session_state.comparison_df)
     
     status_container = st.container()
     with status_container:
@@ -1173,18 +1227,20 @@ def run_reconciliation():
     with st.spinner(f"Running reconciliation on {total_rows:,} total rows across {len(loaded_files)} files..."):
         try:
             # Run reconciliation (pass None for missing files)
-            reconciled_sales, reconciled_settlement, reconciled_credit_note, stats = matching_engine.run_reconciliation(
+            reconciled_sales, reconciled_settlement, reconciled_credit_note, reconciled_comparison, stats = matching_engine.run_reconciliation(
                 st.session_state.sales_df,
                 st.session_state.settlement_df,
                 st.session_state.match_rules,
                 st.session_state.populate_rules,
-                st.session_state.credit_note_df
+                st.session_state.credit_note_df,
+                st.session_state.comparison_df
             )
             
             # Store results
             st.session_state.reconciled_sales_df = reconciled_sales
             st.session_state.reconciled_settlement_df = reconciled_settlement
             st.session_state.reconciled_credit_note_df = reconciled_credit_note
+            st.session_state.reconciled_comparison_df = reconciled_comparison
             st.session_state.match_stats = stats
             
             st.success(f"""

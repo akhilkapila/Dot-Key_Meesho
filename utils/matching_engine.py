@@ -304,8 +304,9 @@ class MatchingEngine:
         match_rules: List[Dict],
         populate_rules: List[Dict],
         credit_note_df: pd.DataFrame = None,
+        comparison_df: pd.DataFrame = None,
         progress_callback: Optional[callable] = None
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 'MatchStats']:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, 'MatchStats']:
         """
         Run full reconciliation with matching and population.
         
@@ -315,21 +316,24 @@ class MatchingEngine:
             match_rules: List of match rule dicts
             populate_rules: List of populate rule dicts
             credit_note_df: Optional Credit Note DataFrame
+            comparison_df: Optional Comparison Data DataFrame
             progress_callback: Optional callback(current_row, total_rows, phase) for progress updates
             
         Returns:
-            Tuple of (modified sales_df, modified settlement_df, modified credit_note_df, stats)
+            Tuple of (modified sales_df, modified settlement_df, modified credit_note_df, modified comparison_df, stats)
         """
         # Handle optional dataframes
         result_sales = sales_df.copy() if sales_df is not None else None
         result_settlement = settlement_df.copy() if settlement_df is not None else None
         result_credit_note = credit_note_df.copy() if credit_note_df is not None else None
+        result_comparison = comparison_df.copy() if comparison_df is not None else None
         
         # Count total rows from all loaded files
         total_rows = sum([
             len(sales_df) if sales_df is not None else 0,
             len(settlement_df) if settlement_df is not None else 0,
-            len(credit_note_df) if credit_note_df is not None else 0
+            len(credit_note_df) if credit_note_df is not None else 0,
+            len(comparison_df) if comparison_df is not None else 0
         ])
         
         # Helper to check if a variable is a valid DataFrame
@@ -344,12 +348,15 @@ class MatchingEngine:
                 return result_settlement
             elif sheet_name == 'Credit Note' and is_valid_df(result_credit_note):
                 return result_credit_note
+            elif sheet_name == 'Comparison Data' and is_valid_df(result_comparison):
+                return result_comparison
             return None
         
         # Build match lookup based on rules
         all_matches_to_sales = {}  # target_idx -> source_indices
         all_matches_to_settlement = {}
         all_matches_to_credit_note = {}
+        all_matches_to_comparison = {}
         
         # Report starting
         if progress_callback:
@@ -398,6 +405,11 @@ class MatchingEngine:
                     if target_idx not in all_matches_to_credit_note:
                         all_matches_to_credit_note[target_idx] = []
                     all_matches_to_credit_note[target_idx].extend(source_indices)
+            elif sheet1 == 'Comparison Data':
+                for target_idx, source_indices in matches.items():
+                    if target_idx not in all_matches_to_comparison:
+                        all_matches_to_comparison[target_idx] = []
+                    all_matches_to_comparison[target_idx].extend(source_indices)
             
             if progress_callback:
                 progress_callback(len(all_matches_to_sales), total_rows, f"Found {len(all_matches_to_sales)} Sales matches...")
@@ -425,6 +437,11 @@ class MatchingEngine:
                     if target_idx not in all_matches_to_credit_note:
                         all_matches_to_credit_note[target_idx] = []
                     all_matches_to_credit_note[target_idx].extend(source_indices)
+            elif sheet2 == 'Comparison Data':
+                for target_idx, source_indices in reverse_matches.items():
+                    if target_idx not in all_matches_to_comparison:
+                        all_matches_to_comparison[target_idx] = []
+                    all_matches_to_comparison[target_idx].extend(source_indices)
         
         if progress_callback:
             progress_callback(len(all_matches_to_sales), total_rows, "Matching complete. Applying population rules...")
@@ -447,6 +464,9 @@ class MatchingEngine:
             elif target_sheet == 'Credit Note' and is_valid_df(result_credit_note):
                 target_df = result_credit_note
                 matches = all_matches_to_credit_note
+            elif target_sheet == 'Comparison Data' and is_valid_df(result_comparison):
+                target_df = result_comparison
+                matches = all_matches_to_comparison
             else:
                 continue
             
@@ -457,6 +477,8 @@ class MatchingEngine:
                 source_df = result_settlement
             elif source_sheet == 'Credit Note' and is_valid_df(result_credit_note):
                 source_df = result_credit_note
+            elif source_sheet == 'Comparison Data' and is_valid_df(result_comparison):
+                source_df = result_comparison
             else:
                 continue
             
@@ -472,13 +494,16 @@ class MatchingEngine:
                     result_settlement = modified_df
                 elif target_sheet == 'Credit Note':
                     result_credit_note = modified_df
+                elif target_sheet == 'Comparison Data':
+                    result_comparison = modified_df
         
         # Calculate stats - count matches across all sheets
-        total_matches = len(all_matches_to_sales) + len(all_matches_to_settlement) + len(all_matches_to_credit_note)
+        total_matches = len(all_matches_to_sales) + len(all_matches_to_settlement) + len(all_matches_to_credit_note) + len(all_matches_to_comparison)
         multiple_sales = sum(1 for indices in all_matches_to_sales.values() if len(indices) > 1)
         multiple_settlement = sum(1 for indices in all_matches_to_settlement.values() if len(indices) > 1)
         multiple_credit = sum(1 for indices in all_matches_to_credit_note.values() if len(indices) > 1)
-        total_multiple = multiple_sales + multiple_settlement + multiple_credit
+        multiple_comparison = sum(1 for indices in all_matches_to_comparison.values() if len(indices) > 1)
+        total_multiple = multiple_sales + multiple_settlement + multiple_credit + multiple_comparison
         
         match_stats = MatchStats(
             total_target_rows=total_rows,
@@ -488,13 +513,14 @@ class MatchingEngine:
             match_percentage=(total_matches / total_rows * 100) if total_rows > 0 else 0
         )
         
-        return result_sales, result_settlement, result_credit_note, match_stats
+        return result_sales, result_settlement, result_credit_note, result_comparison, match_stats
     
     def export_reconciled_workbook(
         self,
         sales_df: pd.DataFrame = None,
         settlement_df: pd.DataFrame = None,
-        credit_note_df: pd.DataFrame = None
+        credit_note_df: pd.DataFrame = None,
+        comparison_df: pd.DataFrame = None
     ) -> bytes:
         """
         Export reconciled data as multi-sheet Excel workbook.
@@ -503,6 +529,7 @@ class MatchingEngine:
             sales_df: Modified Sales DataFrame (optional)
             settlement_df: Modified Settlement DataFrame (optional)
             credit_note_df: Modified Credit Note DataFrame (optional)
+            comparison_df: Modified Comparison Data DataFrame (optional)
             
         Returns:
             Excel file as bytes
@@ -517,6 +544,8 @@ class MatchingEngine:
                 settlement_df.to_excel(writer, sheet_name='Settlement', index=False)
             if credit_note_df is not None:
                 credit_note_df.to_excel(writer, sheet_name='Credit Note', index=False)
+            if comparison_df is not None:
+                comparison_df.to_excel(writer, sheet_name='Comparison Data', index=False)
         
         return buffer.getvalue()
     
