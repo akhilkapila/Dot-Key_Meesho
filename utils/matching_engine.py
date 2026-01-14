@@ -222,7 +222,8 @@ class MatchingEngine:
         source_df: pd.DataFrame,
         matches: Dict[int, List[int]],
         target_col_letter: str,
-        source_col_name: str
+        source_col_name: str,
+        custom_col_name: str = ''
     ) -> Tuple[pd.DataFrame, Dict[str, int]]:
         """
         Populate values from source to target based on matches.
@@ -233,6 +234,7 @@ class MatchingEngine:
             matches: Dict mapping target row index to source row indices
             target_col_letter: Excel column letter for target (A, B, C, ...)
             source_col_name: Column name in source DataFrame
+            custom_col_name: Optional custom name for the target column
             
         Returns:
             Tuple of (modified target DataFrame, stats dict)
@@ -244,6 +246,22 @@ class MatchingEngine:
         while len(result_df.columns) <= target_col_idx:
             new_col_name = f"Column_{len(result_df.columns) + 1}"
             result_df[new_col_name] = np.nan
+        
+        # Apply custom column name if provided
+        if custom_col_name:
+            # Ensure uniqueness by checking existing columns
+            final_name = custom_col_name
+            existing_cols = list(result_df.columns)
+            # Don't count the column we're replacing
+            existing_cols[target_col_idx] = None
+            counter = 1
+            while final_name in existing_cols:
+                final_name = f"{custom_col_name}_{counter}"
+                counter += 1
+            
+            cols = list(result_df.columns)
+            cols[target_col_idx] = final_name
+            result_df.columns = cols
         
         target_col_name = result_df.columns[target_col_idx]
         
@@ -359,22 +377,31 @@ class MatchingEngine:
         for rule in populate_rules:
             target_sheet = rule.get('target_sheet', 'Sales')
             target_col_letter = rule.get('target_column_letter', 'A')
+            custom_col_name = rule.get('target_column_name', '')  # Custom column name
             source_sheet = rule.get('source_sheet', 'Settlement')
             source_col = rule.get('source_column', '')
             
+            # Determine target DataFrame and matches
             if target_sheet == 'Sales':
                 target_df = result_sales
-                source_df = result_settlement
                 matches = all_matches_to_sales
             else:
                 target_df = result_settlement
-                source_df = result_sales
                 matches = all_matches_to_settlement
+            
+            # Determine source DataFrame based on source_sheet
+            if source_sheet == 'Sales':
+                source_df = result_sales
+            elif source_sheet == 'Settlement':
+                source_df = result_settlement
+            else:
+                # Credit Note or other - skip for now as it's not matched
+                continue
             
             if source_col and source_col in source_df.columns:
                 modified_df, stats = self.populate_values(
                     target_df, source_df, matches,
-                    target_col_letter, source_col
+                    target_col_letter, source_col, custom_col_name
                 )
                 
                 if target_sheet == 'Sales':

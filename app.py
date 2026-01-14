@@ -167,15 +167,19 @@ def init_session_state():
         # File data
         'sales_df': None,
         'settlement_df': None,
+        'credit_note_df': None,
         'reconciled_sales_df': None,
         'reconciled_settlement_df': None,
+        'reconciled_credit_note_df': None,
         'workbook_created': False,
         
         # File info
         'sales_file_name': None,
         'settlement_file_name': None,
+        'credit_note_file_name': None,
         'sales_stats': None,
         'settlement_stats': None,
+        'credit_note_stats': None,
         
         # Matching configuration
         'match_rules': [],
@@ -398,11 +402,11 @@ def load_sample_data():
 def render_upload_tab():
     """Render the file upload interface."""
     st.markdown("## 📤 Upload Files")
-    st.markdown("Upload your sales and settlement files to begin reconciliation.")
+    st.markdown("Upload your sales, settlement, and optionally credit note files to begin reconciliation.")
     
     file_handler = get_file_handler()
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     # Sales File Upload
     with col1:
@@ -426,6 +430,19 @@ def render_upload_tab():
             "settlement_file_name",
             "settlement_stats",
             "settlement_key"
+        )
+    
+    # Credit Note File Upload (Optional)
+    with col3:
+        st.markdown("### 📝 Credit Note File")
+        st.caption("*(Optional)*")
+        render_file_uploader(
+            "credit_note",
+            file_handler,
+            "credit_note_df",
+            "credit_note_file_name",
+            "credit_note_stats",
+            "credit_note_key"
         )
     
     st.markdown("---")
@@ -696,19 +713,31 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
     """Render population rules builder with sheet and column letter selection."""
     from utils.matching_engine import get_column_letters_with_names, index_to_col_letter
     
+    # Get Credit Note columns if available
+    credit_note_columns = list(st.session_state.credit_note_df.columns) if st.session_state.credit_note_df is not None else []
+    
+    # Build available sheets list
+    available_sheets = ['Sales', 'Settlement']
+    if st.session_state.credit_note_df is not None:
+        available_sheets.append('Credit Note')
+    
+    # Helper to get columns for a sheet
+    def get_columns_for_sheet(sheet_name):
+        if sheet_name == 'Sales':
+            return sales_columns
+        elif sheet_name == 'Settlement':
+            return settlement_columns
+        elif sheet_name == 'Credit Note':
+            return credit_note_columns
+        return []
+    
     # Generate column letter options for each sheet
     sales_col_options = get_column_letters_with_names(st.session_state.sales_df)
     settlement_col_options = get_column_letters_with_names(st.session_state.settlement_df)
     
-    # Format as "A (column_name)" for display
-    sales_letters = [f"{letter} ({name})" for letter, name in sales_col_options]
-    settlement_letters = [f"{letter} ({name})" for letter, name in settlement_col_options]
-    
     # Also add new column options (next available letters)
     next_sales_letter = index_to_col_letter(len(sales_columns))
     next_settlement_letter = index_to_col_letter(len(settlement_columns))
-    sales_letters.append(f"{next_sales_letter} (New Column)")
-    settlement_letters.append(f"{next_settlement_letter} (New Column)")
     
     st.markdown("When a match is found, populate the target column with the value from the source column.")
     
@@ -718,6 +747,7 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
             'id': generate_rule_id(),
             'target_sheet': 'Sales',
             'target_column_letter': next_sales_letter,
+            'target_column_name': '',  # Custom column name
             'source_sheet': 'Settlement',
             'source_column': settlement_columns[0] if settlement_columns else ''
         }
@@ -730,13 +760,13 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
     for idx, rule in enumerate(st.session_state.populate_rules):
         with st.container():
             st.markdown(f"**Rule {idx + 1}**")
-            col1, col2, col3, col4, col5 = st.columns([1.5, 1.5, 1.5, 2, 0.5])
+            col1, col2, col3, col4, col5, col6 = st.columns([1.2, 1, 1.3, 1.2, 1.8, 0.5])
             
             with col1:
                 target_sheet = st.selectbox(
                     "Target Sheet",
-                    ['Sales', 'Settlement'],
-                    index=['Sales', 'Settlement'].index(rule.get('target_sheet', 'Sales')),
+                    available_sheets,
+                    index=available_sheets.index(rule.get('target_sheet', 'Sales')) if rule.get('target_sheet', 'Sales') in available_sheets else 0,
                     key=f"pop_target_sheet_{rule['id']}"
                 )
                 rule['target_sheet'] = target_sheet
@@ -746,28 +776,41 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
                 current_letter = rule.get('target_column_letter', 'A')
                 
                 target_col = st.text_input(
-                    "Target Column (e.g., A, H, AA)",
+                    "Target Col",
                     value=current_letter,
                     key=f"pop_target_col_{rule['id']}",
                     max_chars=3
                 )
-                # Validate and store the column letter (uppercase)
                 rule['target_column_letter'] = target_col.upper().strip() if target_col else 'A'
             
             with col3:
-                # Source sheet is opposite of target
-                source_sheet = 'Settlement' if target_sheet == 'Sales' else 'Sales'
-                st.text_input(
+                # Custom column name (optional)
+                current_name = rule.get('target_column_name', '')
+                col_name = st.text_input(
+                    "Column Name",
+                    value=current_name,
+                    key=f"pop_col_name_{rule['id']}",
+                    placeholder="Optional"
+                )
+                rule['target_column_name'] = col_name
+            
+            with col4:
+                # Manual source sheet selection
+                current_source_sheet = rule.get('source_sheet', 'Settlement')
+                if current_source_sheet not in available_sheets:
+                    current_source_sheet = available_sheets[0]
+                
+                source_sheet = st.selectbox(
                     "Source Sheet",
-                    value=source_sheet,
-                    disabled=True,
+                    available_sheets,
+                    index=available_sheets.index(current_source_sheet),
                     key=f"pop_source_sheet_{rule['id']}"
                 )
                 rule['source_sheet'] = source_sheet
             
-            with col4:
+            with col5:
                 # Source column from source sheet
-                source_cols = settlement_columns if source_sheet == 'Settlement' else sales_columns
+                source_cols = get_columns_for_sheet(source_sheet)
                 current_source = rule.get('source_column', '')
                 
                 source_idx = 0
@@ -776,13 +819,13 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
                 
                 source_col = st.selectbox(
                     "Source Column",
-                    source_cols,
+                    source_cols if source_cols else [''],
                     index=source_idx,
                     key=f"pop_source_col_{rule['id']}"
                 )
                 rule['source_column'] = source_col
             
-            with col5:
+            with col6:
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("🗑️", key=f"remove_pop_{rule['id']}"):
                     rules_to_remove.append(idx)

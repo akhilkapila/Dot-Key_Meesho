@@ -66,8 +66,9 @@ class PopulateRule:
     id: str
     target_sheet: str  # 'Sales' or 'Settlement'
     target_column_letter: str  # Excel column letter (A, B, C, ...)
-    source_sheet: str  # 'Sales' or 'Settlement' (opposite of target)
+    source_sheet: str  # 'Sales', 'Settlement', or 'Credit Note'
     source_column: str  # Column name from source sheet
+    target_column_name: Optional[str] = ''  # Custom name for the target column
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -84,6 +85,8 @@ class PopulateRule:
             data['target_sheet'] = 'Sales'
         if 'condition' in data:
             data.pop('condition')  # Remove legacy field
+        if 'target_column_name' not in data:
+            data['target_column_name'] = ''  # Default empty for legacy profiles
         return cls(**data)
 
 
