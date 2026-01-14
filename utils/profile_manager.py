@@ -46,17 +46,30 @@ class AppSettings(Base):
 class MatchRule:
     """Data class for match rules."""
     id: str
-    sales_column: str
-    settlement_column: str
+    sales_column: str  # Legacy field for backward compatibility
+    settlement_column: str  # Legacy field for backward compatibility
     match_type: str  # 'exact', 'fuzzy', 'numeric_range', 'date_range'
     tolerance: Optional[float] = None  # For numeric/fuzzy matching
     fuzzy_threshold: Optional[int] = None  # For fuzzy matching (0-100)
+    sheet1: Optional[str] = 'Sales'  # New field for sheet selection
+    sheet2: Optional[str] = 'Settlement'  # New field for sheet selection
+    column1: Optional[str] = ''  # New field - column from sheet1
+    column2: Optional[str] = ''  # New field - column from sheet2
     
     def to_dict(self) -> Dict:
         return asdict(self)
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'MatchRule':
+        # Ensure new fields have defaults for legacy profiles
+        if 'sheet1' not in data:
+            data['sheet1'] = 'Sales'
+        if 'sheet2' not in data:
+            data['sheet2'] = 'Settlement'
+        if 'column1' not in data:
+            data['column1'] = data.get('sales_column', '')
+        if 'column2' not in data:
+            data['column2'] = data.get('settlement_column', '')
         return cls(**data)
 
 

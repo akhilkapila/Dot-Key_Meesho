@@ -303,75 +303,131 @@ class MatchingEngine:
         settlement_df: pd.DataFrame,
         match_rules: List[Dict],
         populate_rules: List[Dict],
+        credit_note_df: pd.DataFrame = None,
         progress_callback: Optional[callable] = None
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, MatchStats]:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 'MatchStats']:
         """
         Run full reconciliation with matching and population.
         
         Args:
-            sales_df: Sales DataFrame
-            settlement_df: Settlement DataFrame
+            sales_df: Sales DataFrame (can be None)
+            settlement_df: Settlement DataFrame (can be None)
             match_rules: List of match rule dicts
             populate_rules: List of populate rule dicts
+            credit_note_df: Optional Credit Note DataFrame
             progress_callback: Optional callback(current_row, total_rows, phase) for progress updates
             
         Returns:
-            Tuple of (modified sales_df, modified settlement_df, stats)
+            Tuple of (modified sales_df, modified settlement_df, modified credit_note_df, stats)
         """
-        result_sales = sales_df.copy()
-        result_settlement = settlement_df.copy()
+        # Handle optional dataframes
+        result_sales = sales_df.copy() if sales_df is not None else None
+        result_settlement = settlement_df.copy() if settlement_df is not None else None
+        result_credit_note = credit_note_df.copy() if credit_note_df is not None else None
         
-        total_sales_rows = len(sales_df)
-        total_settlement_rows = len(settlement_df)
+        # Count total rows from all loaded files
+        total_rows = sum([
+            len(sales_df) if sales_df is not None else 0,
+            len(settlement_df) if settlement_df is not None else 0,
+            len(credit_note_df) if credit_note_df is not None else 0
+        ])
+        
+        # Helper to check if a variable is a valid DataFrame
+        def is_valid_df(df):
+            return isinstance(df, pd.DataFrame)
+        
+        # Helper to get DataFrame by sheet name
+        def get_df(sheet_name):
+            if sheet_name == 'Sales':
+                return result_sales
+            elif sheet_name == 'Settlement':
+                return result_settlement
+            elif sheet_name == 'Credit Note' and is_valid_df(result_credit_note):
+                return result_credit_note
+            return None
         
         # Build match lookup based on rules
         all_matches_to_sales = {}  # target_idx -> source_indices
         all_matches_to_settlement = {}
+        all_matches_to_credit_note = {}
         
         # Report starting
         if progress_callback:
-            progress_callback(0, total_sales_rows, "Starting matching...")
+            progress_callback(0, total_rows, "Starting matching...")
         
         for rule_idx, rule in enumerate(match_rules):
-            sales_col = rule.get('sales_column')
-            settlement_col = rule.get('settlement_column')
+            # Support new format (sheet1/column1) with fallback to legacy (sales_column/settlement_column)
+            sheet1 = rule.get('sheet1', 'Sales')
+            sheet2 = rule.get('sheet2', 'Settlement')
+            col1 = rule.get('column1') or rule.get('sales_column', '')
+            col2 = rule.get('column2') or rule.get('settlement_column', '')
             match_type = rule.get('match_type', 'exact')
             fuzzy_threshold = rule.get('fuzzy_threshold', 80)
             tolerance = rule.get('tolerance', 0.01)
             
-            if progress_callback:
-                progress_callback(0, total_sales_rows, f"Matching rule {rule_idx + 1}: {sales_col} ↔ {settlement_col}")
+            df1 = get_df(sheet1)
+            df2 = get_df(sheet2)
             
-            # Find matches from Sales perspective
+            # Use isinstance to check for valid DataFrame instead of direct None comparison
+            if not is_valid_df(df1) or not is_valid_df(df2) or not col1 or not col2:
+                continue
+            
+            if progress_callback:
+                progress_callback(0, total_rows, f"Matching rule {rule_idx + 1}: {sheet1}.{col1} ↔ {sheet2}.{col2}")
+            
+            # Find matches from sheet1 perspective
             matches, _ = self.find_matches(
-                result_sales, sales_col,
-                result_settlement, settlement_col,
+                df1, col1,
+                df2, col2,
                 match_type, fuzzy_threshold, tolerance
             )
             
-            # Merge matches
-            for target_idx, source_indices in matches.items():
-                if target_idx not in all_matches_to_sales:
-                    all_matches_to_sales[target_idx] = []
-                all_matches_to_sales[target_idx].extend(source_indices)
+            # Store matches based on sheet1
+            if sheet1 == 'Sales':
+                for target_idx, source_indices in matches.items():
+                    if target_idx not in all_matches_to_sales:
+                        all_matches_to_sales[target_idx] = []
+                    all_matches_to_sales[target_idx].extend(source_indices)
+            elif sheet1 == 'Settlement':
+                for target_idx, source_indices in matches.items():
+                    if target_idx not in all_matches_to_settlement:
+                        all_matches_to_settlement[target_idx] = []
+                    all_matches_to_settlement[target_idx].extend(source_indices)
+            elif sheet1 == 'Credit Note':
+                for target_idx, source_indices in matches.items():
+                    if target_idx not in all_matches_to_credit_note:
+                        all_matches_to_credit_note[target_idx] = []
+                    all_matches_to_credit_note[target_idx].extend(source_indices)
             
             if progress_callback:
-                progress_callback(len(all_matches_to_sales), total_sales_rows, f"Found {len(all_matches_to_sales)} matches so far...")
+                progress_callback(len(all_matches_to_sales), total_rows, f"Found {len(all_matches_to_sales)} Sales matches...")
             
-            # Find matches from Settlement perspective
+            # Find matches from sheet2 perspective (reverse)
             reverse_matches, _ = self.find_matches(
-                result_settlement, settlement_col,
-                result_sales, sales_col,
+                df2, col2,
+                df1, col1,
                 match_type, fuzzy_threshold, tolerance
             )
             
-            for target_idx, source_indices in reverse_matches.items():
-                if target_idx not in all_matches_to_settlement:
-                    all_matches_to_settlement[target_idx] = []
-                all_matches_to_settlement[target_idx].extend(source_indices)
+            # Store reverse matches based on sheet2
+            if sheet2 == 'Sales':
+                for target_idx, source_indices in reverse_matches.items():
+                    if target_idx not in all_matches_to_sales:
+                        all_matches_to_sales[target_idx] = []
+                    all_matches_to_sales[target_idx].extend(source_indices)
+            elif sheet2 == 'Settlement':
+                for target_idx, source_indices in reverse_matches.items():
+                    if target_idx not in all_matches_to_settlement:
+                        all_matches_to_settlement[target_idx] = []
+                    all_matches_to_settlement[target_idx].extend(source_indices)
+            elif sheet2 == 'Credit Note':
+                for target_idx, source_indices in reverse_matches.items():
+                    if target_idx not in all_matches_to_credit_note:
+                        all_matches_to_credit_note[target_idx] = []
+                    all_matches_to_credit_note[target_idx].extend(source_indices)
         
         if progress_callback:
-            progress_callback(len(all_matches_to_sales), total_sales_rows, "Matching complete. Applying population rules...")
+            progress_callback(len(all_matches_to_sales), total_rows, "Matching complete. Applying population rules...")
         
         # Apply populate rules
         for rule in populate_rules:
@@ -385,17 +441,23 @@ class MatchingEngine:
             if target_sheet == 'Sales':
                 target_df = result_sales
                 matches = all_matches_to_sales
-            else:
+            elif target_sheet == 'Settlement':
                 target_df = result_settlement
                 matches = all_matches_to_settlement
+            elif target_sheet == 'Credit Note' and is_valid_df(result_credit_note):
+                target_df = result_credit_note
+                matches = all_matches_to_credit_note
+            else:
+                continue
             
             # Determine source DataFrame based on source_sheet
             if source_sheet == 'Sales':
                 source_df = result_sales
             elif source_sheet == 'Settlement':
                 source_df = result_settlement
+            elif source_sheet == 'Credit Note' and is_valid_df(result_credit_note):
+                source_df = result_credit_note
             else:
-                # Credit Note or other - skip for now as it's not matched
                 continue
             
             if source_col and source_col in source_df.columns:
@@ -406,40 +468,57 @@ class MatchingEngine:
                 
                 if target_sheet == 'Sales':
                     result_sales = modified_df
-                else:
+                elif target_sheet == 'Settlement':
                     result_settlement = modified_df
+                elif target_sheet == 'Credit Note':
+                    result_credit_note = modified_df
         
-        # Calculate stats
-        total_target = len(sales_df)
-        matched = len(all_matches_to_sales)
-        multiple = sum(1 for indices in all_matches_to_sales.values() if len(indices) > 1)
+        # Calculate stats - count matches across all sheets
+        total_matches = len(all_matches_to_sales) + len(all_matches_to_settlement) + len(all_matches_to_credit_note)
+        multiple_sales = sum(1 for indices in all_matches_to_sales.values() if len(indices) > 1)
+        multiple_settlement = sum(1 for indices in all_matches_to_settlement.values() if len(indices) > 1)
+        multiple_credit = sum(1 for indices in all_matches_to_credit_note.values() if len(indices) > 1)
+        total_multiple = multiple_sales + multiple_settlement + multiple_credit
         
         match_stats = MatchStats(
-            total_target_rows=total_target,
-            matched_rows=matched,
-            unmatched_rows=total_target - matched,
-            multiple_match_rows=multiple,
-            match_percentage=(matched / total_target * 100) if total_target > 0 else 0
+            total_target_rows=total_rows,
+            matched_rows=total_matches,
+            unmatched_rows=total_rows - total_matches,
+            multiple_match_rows=total_multiple,
+            match_percentage=(total_matches / total_rows * 100) if total_rows > 0 else 0
         )
         
-        return result_sales, result_settlement, match_stats
+        return result_sales, result_settlement, result_credit_note, match_stats
     
     def export_reconciled_workbook(
         self,
-        sales_df: pd.DataFrame,
-        settlement_df: pd.DataFrame
+        sales_df: pd.DataFrame = None,
+        settlement_df: pd.DataFrame = None,
+        credit_note_df: pd.DataFrame = None
     ) -> bytes:
         """
         Export reconciled data as multi-sheet Excel workbook.
         
         Args:
-            sales_df: Modified Sales DataFrame
-            settlement_df: Modified Settlement DataFrame
+            sales_df: Modified Sales DataFrame (optional)
+            settlement_df: Modified Settlement DataFrame (optional)
+            credit_note_df: Modified Credit Note DataFrame (optional)
             
         Returns:
             Excel file as bytes
         """
-        return self.create_workbook(sales_df, settlement_df)
+        self.logger.info("Exporting reconciled workbook")
+        
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            if sales_df is not None:
+                sales_df.to_excel(writer, sheet_name='Sales', index=False)
+            if settlement_df is not None:
+                settlement_df.to_excel(writer, sheet_name='Settlement', index=False)
+            if credit_note_df is not None:
+                credit_note_df.to_excel(writer, sheet_name='Credit Note', index=False)
+        
+        return buffer.getvalue()
     
     def test_match(
         self,

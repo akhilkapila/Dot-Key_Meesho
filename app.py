@@ -435,7 +435,6 @@ def render_upload_tab():
     # Credit Note File Upload (Optional)
     with col3:
         st.markdown("### 📝 Credit Note File")
-        st.caption("*(Optional)*")
         render_file_uploader(
             "credit_note",
             file_handler,
@@ -599,17 +598,30 @@ def render_logic_builder_tab():
     """Render the matching logic builder interface."""
     st.markdown("## ⚙️ Matching Logic Builder")
     
-    if st.session_state.sales_df is None or st.session_state.settlement_df is None:
-        st.warning("⚠️ Please upload both files first in the **Upload** tab.")
+    # Count loaded files
+    loaded_files = []
+    if st.session_state.sales_df is not None:
+        loaded_files.append('Sales')
+    if st.session_state.settlement_df is not None:
+        loaded_files.append('Settlement')
+    if st.session_state.credit_note_df is not None:
+        loaded_files.append('Credit Note')
+    
+    if len(loaded_files) < 2:
+        st.warning(f"⚠️ Please upload at least 2 files in the **Upload** tab. Currently loaded: {len(loaded_files)}")
         return
     
-    # Get column lists
-    sales_columns = list(st.session_state.sales_df.columns)
-    settlement_columns = list(st.session_state.settlement_df.columns)
+    # Get column lists for each loaded file
+    sales_columns = list(st.session_state.sales_df.columns) if st.session_state.sales_df is not None else []
+    settlement_columns = list(st.session_state.settlement_df.columns) if st.session_state.settlement_df is not None else []
+    credit_note_columns = list(st.session_state.credit_note_df.columns) if st.session_state.credit_note_df is not None else []
+    
+    # Show loaded files info
+    st.info(f"📁 Loaded files: **{', '.join(loaded_files)}**")
     
     # Match Rules Section
     st.markdown("### 🎯 Match Rules")
-    st.markdown("Define how to match records between sales and settlement data.")
+    st.markdown("Define how to match records between files.")
     
     render_match_rules(sales_columns, settlement_columns)
     
@@ -628,12 +640,35 @@ def render_logic_builder_tab():
 
 
 def render_match_rules(sales_columns: List[str], settlement_columns: List[str]):
-    """Render match rules builder."""
+    """Render match rules builder with sheet selection."""
+    
+    # Get Credit Note columns if available
+    credit_note_columns = list(st.session_state.credit_note_df.columns) if st.session_state.credit_note_df is not None else []
+    
+    # Build available sheets list
+    available_sheets = ['Sales', 'Settlement']
+    if st.session_state.credit_note_df is not None:
+        available_sheets.append('Credit Note')
+    
+    # Helper to get columns for a sheet
+    def get_columns_for_sheet(sheet_name):
+        if sheet_name == 'Sales':
+            return sales_columns
+        elif sheet_name == 'Settlement':
+            return settlement_columns
+        elif sheet_name == 'Credit Note':
+            return credit_note_columns
+        return []
     
     # Add new rule button
     if st.button("➕ Add Match Rule", key="add_match_rule"):
         new_rule = {
             'id': generate_rule_id(),
+            'sheet1': 'Sales',
+            'sheet2': 'Settlement',
+            'column1': sales_columns[0] if sales_columns else '',
+            'column2': settlement_columns[0] if settlement_columns else '',
+            # Keep legacy fields for backward compatibility
             'sales_column': sales_columns[0] if sales_columns else '',
             'settlement_column': settlement_columns[0] if settlement_columns else '',
             'match_type': 'exact',
@@ -648,36 +683,76 @@ def render_match_rules(sales_columns: List[str], settlement_columns: List[str]):
     
     for idx, rule in enumerate(st.session_state.match_rules):
         with st.container():
-            col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([1.2, 1.8, 1.2, 1.8, 1.3, 1.3, 0.5])
             
+            # Sheet 1 selection
             with col1:
-                sales_col = st.selectbox(
-                    "Sales Column",
-                    sales_columns,
-                    index=sales_columns.index(rule['sales_column']) if rule['sales_column'] in sales_columns else 0,
-                    key=f"match_sales_{rule['id']}"
+                sheet1 = st.selectbox(
+                    "Sheet 1",
+                    available_sheets,
+                    index=available_sheets.index(rule.get('sheet1', 'Sales')) if rule.get('sheet1', 'Sales') in available_sheets else 0,
+                    key=f"match_sheet1_{rule['id']}"
                 )
-                rule['sales_column'] = sales_col
+                rule['sheet1'] = sheet1
             
+            # Column 1 from Sheet 1
             with col2:
-                settlement_col = st.selectbox(
-                    "Settlement Column",
-                    settlement_columns,
-                    index=settlement_columns.index(rule['settlement_column']) if rule['settlement_column'] in settlement_columns else 0,
-                    key=f"match_settlement_{rule['id']}"
+                sheet1_cols = get_columns_for_sheet(sheet1)
+                # Try to get column1, fallback to sales_column for backward compatibility
+                col1_val = rule.get('column1') or rule.get('sales_column', '')
+                col1_idx = sheet1_cols.index(col1_val) if col1_val in sheet1_cols else 0
+                
+                column1 = st.selectbox(
+                    "Column 1",
+                    sheet1_cols if sheet1_cols else [''],
+                    index=col1_idx,
+                    key=f"match_col1_{rule['id']}"
                 )
-                rule['settlement_column'] = settlement_col
+                rule['column1'] = column1
+                # Keep legacy field updated
+                if sheet1 == 'Sales':
+                    rule['sales_column'] = column1
             
+            # Sheet 2 selection
             with col3:
+                sheet2 = st.selectbox(
+                    "Sheet 2",
+                    available_sheets,
+                    index=available_sheets.index(rule.get('sheet2', 'Settlement')) if rule.get('sheet2', 'Settlement') in available_sheets else 1,
+                    key=f"match_sheet2_{rule['id']}"
+                )
+                rule['sheet2'] = sheet2
+            
+            # Column 2 from Sheet 2
+            with col4:
+                sheet2_cols = get_columns_for_sheet(sheet2)
+                # Try to get column2, fallback to settlement_column for backward compatibility
+                col2_val = rule.get('column2') or rule.get('settlement_column', '')
+                col2_idx = sheet2_cols.index(col2_val) if col2_val in sheet2_cols else 0
+                
+                column2 = st.selectbox(
+                    "Column 2",
+                    sheet2_cols if sheet2_cols else [''],
+                    index=col2_idx,
+                    key=f"match_col2_{rule['id']}"
+                )
+                rule['column2'] = column2
+                # Keep legacy field updated
+                if sheet2 == 'Settlement':
+                    rule['settlement_column'] = column2
+            
+            # Match Type
+            with col5:
                 match_type = st.selectbox(
                     "Match Type",
                     ['exact', 'fuzzy', 'numeric_range', 'date_range'],
-                    index=['exact', 'fuzzy', 'numeric_range', 'date_range'].index(rule['match_type']),
+                    index=['exact', 'fuzzy', 'numeric_range', 'date_range'].index(rule.get('match_type', 'exact')),
                     key=f"match_type_{rule['id']}"
                 )
                 rule['match_type'] = match_type
             
-            with col4:
+            # Match parameters
+            with col6:
                 if match_type == 'fuzzy':
                     threshold = st.slider(
                         "Threshold",
@@ -694,9 +769,9 @@ def render_match_rules(sales_columns: List[str], settlement_columns: List[str]):
                     )
                     rule['tolerance'] = tolerance
                 else:
-                    st.markdown("*Exact match*")
+                    st.markdown("*Exact*")
             
-            with col5:
+            with col7:
                 if st.button("🗑️", key=f"remove_match_{rule['id']}"):
                     rules_to_remove.append(idx)
     
@@ -731,13 +806,13 @@ def render_population_rules(sales_columns: List[str], settlement_columns: List[s
             return credit_note_columns
         return []
     
-    # Generate column letter options for each sheet
-    sales_col_options = get_column_letters_with_names(st.session_state.sales_df)
-    settlement_col_options = get_column_letters_with_names(st.session_state.settlement_df)
+    # Generate column letter options for each sheet (only if loaded)
+    sales_col_options = get_column_letters_with_names(st.session_state.sales_df) if st.session_state.sales_df is not None else []
+    settlement_col_options = get_column_letters_with_names(st.session_state.settlement_df) if st.session_state.settlement_df is not None else []
     
     # Also add new column options (next available letters)
-    next_sales_letter = index_to_col_letter(len(sales_columns))
-    next_settlement_letter = index_to_col_letter(len(settlement_columns))
+    next_sales_letter = index_to_col_letter(len(sales_columns)) if sales_columns else 'A'
+    next_settlement_letter = index_to_col_letter(len(settlement_columns)) if settlement_columns else 'A'
     
     st.markdown("When a match is found, populate the target column with the value from the source column.")
     
@@ -969,8 +1044,15 @@ def render_export_tab():
     """Render the export tab with reconciliation execution."""
     st.markdown("## 📥 Run Reconciliation & Export")
     
-    if st.session_state.sales_df is None or st.session_state.settlement_df is None:
-        st.warning("⚠️ Please upload both files first in the **Upload** tab.")
+    # Count loaded files
+    loaded_count = sum([
+        st.session_state.sales_df is not None,
+        st.session_state.settlement_df is not None,
+        st.session_state.credit_note_df is not None
+    ])
+    
+    if loaded_count < 2:
+        st.warning(f"⚠️ Please upload at least 2 files in the **Upload** tab. Currently loaded: {loaded_count}")
         return
     
     # Summary of configuration
@@ -986,7 +1068,11 @@ def render_export_tab():
     if st.session_state.match_rules:
         with st.expander("🎯 Match Rules", expanded=False):
             for idx, rule in enumerate(st.session_state.match_rules):
-                st.write(f"**Rule {idx + 1}**: Sales.`{rule['sales_column']}` ↔ Settlement.`{rule['settlement_column']}` ({rule['match_type']})")
+                sheet1 = rule.get('sheet1', 'Sales')
+                col1 = rule.get('column1') or rule.get('sales_column', '')
+                sheet2 = rule.get('sheet2', 'Settlement')
+                col2 = rule.get('column2') or rule.get('settlement_column', '')
+                st.write(f"**Rule {idx + 1}**: {sheet1}.`{col1}` ↔ {sheet2}.`{col2}` ({rule.get('match_type', 'exact')})")
     
     if st.session_state.populate_rules:
         with st.expander("📝 Population Rules", expanded=False):
@@ -1040,7 +1126,8 @@ def render_export_tab():
             with st.spinner("Preparing download file..."):
                 workbook_data = matching_engine.export_reconciled_workbook(
                     st.session_state.reconciled_sales_df,
-                    st.session_state.reconciled_settlement_df
+                    st.session_state.reconciled_settlement_df,
+                    st.session_state.reconciled_credit_note_df
                 )
             
             st.download_button(
@@ -1065,28 +1152,39 @@ def run_reconciliation():
         st.warning("⚠️ Please add at least one match rule in the Logic Builder tab.")
         return
     
-    # Show processing info
-    total_sales = len(st.session_state.sales_df)
-    total_settlement = len(st.session_state.settlement_df)
+    # Count loaded files and total rows
+    loaded_files = []
+    total_rows = 0
+    if st.session_state.sales_df is not None:
+        loaded_files.append(f"Sales ({len(st.session_state.sales_df):,})")
+        total_rows += len(st.session_state.sales_df)
+    if st.session_state.settlement_df is not None:
+        loaded_files.append(f"Settlement ({len(st.session_state.settlement_df):,})")
+        total_rows += len(st.session_state.settlement_df)
+    if st.session_state.credit_note_df is not None:
+        loaded_files.append(f"Credit Note ({len(st.session_state.credit_note_df):,})")
+        total_rows += len(st.session_state.credit_note_df)
     
     status_container = st.container()
     with status_container:
-        st.info(f"🔄 Processing {total_sales:,} sales rows against {total_settlement:,} settlement rows...")
+        st.info(f"🔄 Processing files: {', '.join(loaded_files)}")
         st.markdown(f"**Match Rules:** {len(st.session_state.match_rules)} | **Population Rules:** {len(st.session_state.populate_rules)}")
     
-    with st.spinner(f"Running reconciliation on {total_sales:,} × {total_settlement:,} records..."):
+    with st.spinner(f"Running reconciliation on {total_rows:,} total rows across {len(loaded_files)} files..."):
         try:
-            # Run reconciliation
-            reconciled_sales, reconciled_settlement, stats = matching_engine.run_reconciliation(
+            # Run reconciliation (pass None for missing files)
+            reconciled_sales, reconciled_settlement, reconciled_credit_note, stats = matching_engine.run_reconciliation(
                 st.session_state.sales_df,
                 st.session_state.settlement_df,
                 st.session_state.match_rules,
-                st.session_state.populate_rules
+                st.session_state.populate_rules,
+                st.session_state.credit_note_df
             )
             
             # Store results
             st.session_state.reconciled_sales_df = reconciled_sales
             st.session_state.reconciled_settlement_df = reconciled_settlement
+            st.session_state.reconciled_credit_note_df = reconciled_credit_note
             st.session_state.match_stats = stats
             
             st.success(f"""
